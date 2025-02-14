@@ -35,6 +35,36 @@ function hideSecurityPatchDialog() {
     }, 200);
 }
 
+// Function to handle security patch operation
+async function handleSecurityPatch(mode, value = null) {
+    if (mode === 'disable') {
+        try {
+            await execCommand(`
+                sed -i "s/^auto_config=.*/auto_config=0/" /data/adb/security_patch
+                rm -f /data/adb/tricky_store/security_patch.txt
+            `);
+            showPrompt('security_patch.value_empty');
+            return true;
+        } catch (error) {
+            showPrompt('security_patch.save_failed', false);
+            return false;
+        }
+    } else if (mode === 'manual') {
+        try {
+            await execCommand(`
+                sed -i "s/^auto_config=.*/auto_config=0/" /data/adb/security_patch
+                echo "${value}" > /data/adb/tricky_store/security_patch.txt
+                chmod 644 /data/adb/tricky_store/security_patch.txt
+            `);
+            showPrompt('security_patch.save_success');
+            return true;
+        } catch (error) {
+            showPrompt('security_patch.save_failed', false);
+            return false;
+        }
+    }
+}
+
 // Load current configuration
 async function loadCurrentConfig() {
     try {
@@ -101,6 +131,63 @@ async function loadCurrentConfig() {
     }
 }
 
+// Unified date formatting function
+window.formatDate = function(input, type) {
+    let value = input.value.replace(/-/g, '');
+    let formatted = value.slice(0, 4);
+
+    // Allow 'no' input
+    if (value === 'no') {
+        input.value = 'no';
+        input.setSelectionRange(2, 2);
+        return 'no';
+    }
+
+    if (value.startsWith('n')) {
+        // Only allow 'o' after 'n'
+        if (value.length > 1 && value[1] !== 'o') {
+            value = 'n';
+        }
+        formatted = value.slice(0, 2);
+        if (value.length > 2) {
+            input.value = formatted;
+            input.setSelectionRange(2, 2);
+            return formatted;
+        }
+    } else {
+        // Only allow numbers if not starting with 'n'
+        const numbersOnly = value.replace(/\D/g, '');
+        if (numbersOnly !== value) {
+            input.value = numbersOnly;
+            value = numbersOnly;
+            formatted = numbersOnly.slice(0, 4);
+        }
+        
+        // Add hyphens on 5th and 7th character
+        if (value.length >= 4) {
+            formatted += '-'+ value.slice(4, 6);
+        }
+        if (value.length >= 6) {
+            formatted += '-'+ value.slice(6, 8);
+        }
+    }
+
+    // Handle backspace/delete
+    const lastChar = value.slice(-1);
+    if (lastChar === '-' || (isNaN(lastChar) && !['n'].includes(lastChar))) {
+        formatted = formatted.slice(0, -1);
+    }
+
+    // Update input value
+    const startPos = input.selectionStart;
+    input.value = formatted;
+    const newLength = formatted.length;
+    const shouldMoveCursor = (value.length === 4 || value.length === 6) && newLength > startPos;
+    input.setSelectionRange(shouldMoveCursor ? newLength : startPos, shouldMoveCursor ? newLength : startPos);
+
+    return formatted;
+}
+
 // Validate date format YYYY-MM-DD
 function isValidDateFormat(date) {
     if (date === 'no') return true;
@@ -146,10 +233,17 @@ export function securityPatch() {
                 showPrompt('security_patch.auto_failed', false);
             } else {
                 await execCommand(`sed -i "s/^auto_config=.*/auto_config=1/" /data/adb/security_patch`);
+                // Reset inputs
                 allPatchInput.value = '';
                 systemPatchInput.value = '';
                 bootPatchInput.value = '';
                 vendorPatchInput.value = '';
+
+                // Uncheck advanced mode
+                advancedToggle.checked = false;
+                normalInputs.classList.remove('hidden');
+                advancedInputs.classList.add('hidden');
+
                 showPrompt('security_patch.auto_success');
             }
         } catch (error) {
@@ -165,16 +259,8 @@ export function securityPatch() {
             // Normal mode validation
             const allValue = allPatchInput.value.trim();
             if (!allValue) {
-                // Allow saving empty value
-                try {
-                    await execCommand(`
-                        sed -i "s/^auto_config=.*/auto_config=0/" /data/adb/security_patch
-                        > /data/adb/tricky_store/security_patch.txt
-                    `);
-                    showPrompt('security_patch.value_empty');
-                } catch (error) {
-                    showPrompt('security_patch.save_failed', false);
-                }
+                // Save empty value to disable auto config
+                await handleSecurityPatch('disable');
                 hideSecurityPatchDialog();
                 return;
             }
@@ -182,35 +268,23 @@ export function securityPatch() {
                 showPrompt('security_patch.invalid_all', false);
                 return;
             }
-            try {
-                await execCommand(`
-                    sed -i "s/^auto_config=.*/auto_config=0/" /data/adb/security_patch
-                    echo all=${allValue} > /data/adb/tricky_store/security_patch.txt
-                `);
+            const value = `all=${allValue}`;
+            const result = await handleSecurityPatch('manual', value);
+            if (result) {
+                // Reset inputs
                 systemPatchInput.value = '';
                 bootPatchInput.value = '';
                 vendorPatchInput.value = '';
-                showPrompt('security_patch.save_success');
-            } catch (error) {
-                showPrompt('security_patch.save_failed', false);
             }
         } else {
             // Advanced mode validation
-            const bootValue = bootPatchInput.value.trim();
+            const bootValue = formatDate(bootPatchInput, 'boot');
             const systemValue = systemPatchInput.value.trim();
             const vendorValue = vendorPatchInput.value.trim();
 
             if (!bootValue && !systemValue && !vendorValue) {
-                // Allow saving empty values for advanced mode as well
-                try {
-                    await execCommand(`
-                        sed -i "s/^auto_config=.*/auto_config=0/" /data/adb/security_patch
-                        > /data/adb/tricky_store/security_patch.txt
-                    `);
-                    showPrompt('security_patch.value_empty');
-                } catch (error) {
-                    showPrompt('security_patch.save_failed', false);
-                }
+                // Save empty values to disable auto config
+                await handleSecurityPatch('disable');
                 hideSecurityPatchDialog();
                 return;
             }
@@ -230,21 +304,16 @@ export function securityPatch() {
                 return;
             }
 
-            try {
-                const config = [
-                    systemValue ? `system=${systemValue}` : '',
-                    bootValue ? `boot=${bootValue}` : '',
-                    vendorValue ? `vendor=${vendorValue}` : ''
-                ].filter(Boolean);
-                await execCommand(`
-                    sed -i "s/^auto_config=.*/auto_config=0/" /data/adb/security_patch
-                    echo "${config.filter(Boolean).join('\n')}" > /data/adb/tricky_store/security_patch.txt
-                `);
+            const config = [
+                systemValue ? `system=${systemValue}` : '',
+                bootValue ? `boot=${bootValue}` : '',
+                vendorValue ? `vendor=${vendorValue}` : ''
+            ].filter(Boolean);
+            const value = config.filter(Boolean).join('\n');
+            const result = await handleSecurityPatch('manual', value);
+            if (result) {
+                // Reset inputs
                 allPatchInput.value = '';
-                showPrompt('security_patch.save_success');
-                hideSecurityPatchDialog();
-            } catch (error) {
-                showPrompt('security_patch.save_failed', false);
             }
         }
         hideSecurityPatchDialog();
