@@ -234,9 +234,11 @@ document.getElementById("validkb").addEventListener("click", async () => {
     });
 });
 
+// File selector
 const fileSelector = document.querySelector('.file-selector-overlay');
 let currentPath = '/storage/emulated/0/Download';
 
+// Function to display file in current path
 function updateCurrentPath() {
     const currentPathElement = document.querySelector('.current-path');
     const segments = currentPath.split('/').filter(Boolean);
