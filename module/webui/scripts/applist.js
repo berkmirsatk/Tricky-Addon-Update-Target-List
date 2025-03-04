@@ -1,4 +1,4 @@
-import { basePath, execCommand, floatingBtn, appsWithExclamation, appsWithQuestion, toast } from './main.js';
+import { basePath, execCommand, hideFloatingBtn, appsWithExclamation, appsWithQuestion, toast } from './main.js';
 
 const appTemplate = document.getElementById('app-template').content;
 const modeOverlay = document.querySelector('.mode-overlay');
@@ -38,7 +38,11 @@ export async function fetchAppList() {
             console.warn("Applist file not found or could not be loaded. Skipping applist lookup.");
         }
 
-        const result = await execCommand("pm list packages -3 | awk -F: '{print $2}'; pm list packages -s | awk -F: '{print $2}' | grep -Ex 'com.google.android.gms|com.google.android.gsf|com.android.vending'");
+        const result = await execCommand(`
+            pm list packages -3 | awk -F: '{print $2}'
+            [ -f "/data/adb/tricky_store/system_app" ] && SYSTEM_APP=$(cat "/data/adb/tricky_store/system_app" | tr '\n' '|' | sed 's/|*$//') || SYSTEM_APP=""
+            pm list packages -s | awk -F: '{print $2}' | grep -Ex "$SYSTEM_APP" 2>/dev/null || true
+        `);
         const appEntries = result
             .split("\n")
             .map(line => {
@@ -50,7 +54,11 @@ export async function fetchAppList() {
         for (const entry of appEntries) {
             if (!entry.appName) {
                 try {
-                    const apkPath = await execCommand(`pm path ${entry.packageName} | grep "base.apk" | awk -F: '{print $2}' | tr -d '\\r'`);
+                    const apkPath = await execCommand(`
+                        base_apk=$(pm path ${entry.packageName} | grep "base.apk" | awk -F: '{print $2}' | tr -d '\\r')
+                        [ -n "$base_apk" ] || base_apk=$(pm path ${entry.packageName} | grep ".apk" | awk -F: '{print $2}' | tr -d '\\r')
+                        echo "$base_apk"
+                    `);
                     if (apkPath) {
                         const appName = await execCommand(`${basePath}common/aapt dump badging ${apkPath.trim()} 2>/dev/null | grep "application-label:" | sed "s/application-label://; s/'//g"`);
                         entry.appName = appName.trim() || "Unknown App";
@@ -110,7 +118,7 @@ export async function fetchAppList() {
         toast("Failed to fetch app list!");
         console.error("Failed to fetch or render app list with names:", error);
     }
-    floatingBtn.style.transform = 'translateY(0)';
+    hideFloatingBtn(false);
     toggleableCheckbox();
     if (appListContainer.firstChild !== updateCard) {
         appListContainer.insertBefore(updateCard, appListContainer.firstChild);

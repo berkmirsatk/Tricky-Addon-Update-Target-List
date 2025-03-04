@@ -1,4 +1,4 @@
-import { basePath, execCommand, showPrompt, toast, applyRippleEffect } from './main.js';
+import { basePath, execCommand, showPrompt, toast, applyRippleEffect, refreshAppList } from './main.js';
 
 // Function to check or uncheck all app
 function toggleCheckboxes(shouldCheck) {
@@ -40,21 +40,25 @@ document.getElementById("select-denylist").addEventListener("click", async () =>
 // Function to read the exclude list and uncheck corresponding apps
 document.getElementById("deselect-unnecessary").addEventListener("click", async () => {
     try {
-        const fileCheck = await execCommand(`test -f ${basePath}common/tmp/exclude-list && echo "exists" || echo "not found"`);
-        if (fileCheck.trim() === "not found") {
-            setTimeout(async () => {
-                await execCommand(`sh ${basePath}common/get_extra.sh --unnecessary`);
-            }, 0);
-            console.log("Exclude list not found. Running the unnecessary apps script.");
-        } else {
-            setTimeout(async () => {
-                await execCommand(`sh ${basePath}common/get_extra.sh --xposed`);
-            }, 0);
-            console.log("Exclude list found. Running xposed script.");
-        }
-        await new Promise(resolve => setTimeout(resolve, 100));
-        const result = await execCommand(`cat ${basePath}common/tmp/exclude-list`);
-        const UnnecessaryApps = result.split("\n").map(app => app.trim()).filter(Boolean);
+        const excludeList = await fetch("https://raw.githubusercontent.com/KOWX712/Tricky-Addon-Update-Target-List/main/more-exclude.json")
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                return data.data
+                    .flatMap(category => category.apps)
+                    .map(app => app['package-name'])
+                    .join('\n');
+            })
+            .catch(error => {
+                toast("Failed to download unnecessary apps!");
+                throw error;
+            });
+        const xposed = await execCommand(`sh ${basePath}common/get_extra.sh --xposed`);
+        const UnnecessaryApps = excludeList.split("\n").map(app => app.trim()).filter(Boolean).concat(xposed.split("\n").map(app => app.trim()).filter(Boolean));
         const apps = document.querySelectorAll(".card");
         apps.forEach(app => {
             const contentElement = app.querySelector(".content");
@@ -66,17 +70,115 @@ document.getElementById("deselect-unnecessary").addEventListener("click", async 
         });
         console.log("Unnecessary apps deselected successfully.");
     } catch (error) {
-        toast("Failed!");
-        console.error("Failed to deselect unnecessary apps:", error);
+        toast("Failed to get unnecessary apps!");
+        console.error("Failed to get unnecessary apps:", error);
     }
 });
 
+// Function to add system app
+export async function setupSystemAppMenu() {
+    document.getElementById("add-system-app").addEventListener("click", () => openSystemAppOverlay());
+    document.getElementById("add-system-app-overlay").addEventListener("click", (event) => {
+        if (event.target === event.currentTarget) {
+            closeSystemAppOverlay();
+        }
+    });
+    const systemAppOverlay = document.getElementById("add-system-app-overlay");
+    const systemAppInput = document.getElementById("system-app-input");
+    function openSystemAppOverlay() {
+        renderSystemAppList();
+        document.body.classList.add("no-scroll");
+        systemAppOverlay.style.display = "flex";
+        setTimeout(() => {
+            systemAppOverlay.style.opacity = "1";
+        }, 10);
+        systemAppInput.value = "";
+    }
+    function closeSystemAppOverlay() {
+        document.body.classList.remove("no-scroll");
+        systemAppOverlay.style.opacity = "0";
+        setTimeout(() => {
+            systemAppOverlay.style.display = "none";
+        }, 300);
+    }
+
+    // Add system app button
+    document.getElementById("add-system-app-button").addEventListener("click", async () => {
+        const input = document.getElementById("system-app-input");
+        const packageName = input.value.trim();
+        if (packageName) {
+            try {
+                const result = await execCommand(`pm list packages -s | grep -q ${packageName} || echo "false"`);
+                if (result.includes("false")) {
+                    showPrompt("prompt.system_app_not_found", false);
+                } else {
+                    await execCommand(`
+                        touch "/data/adb/tricky_store/system_app"
+                        echo "${packageName}" >> "/data/adb/tricky_store/system_app"
+                        echo "${packageName}" >> "/data/adb/tricky_store/target.txt"
+                    `);
+                    systemAppInput.value = "";
+                    closeSystemAppOverlay();
+                    refreshAppList();
+                }
+            } catch (error) {
+                console.error("Error adding system app:", error);
+                showPrompt("prompt.add_system_app_error", false);
+            }
+        }
+    });
+
+    // Display current system app list and remove button
+    async function renderSystemAppList() {
+        const currentSystemAppList = document.querySelector(".current-system-app-list");
+        const currentSystemAppListContent = document.querySelector(".current-system-app-list-content");
+        currentSystemAppListContent.innerHTML = "";
+        try {
+            const systemAppList = await execCommand(`[ -f "/data/adb/tricky_store/system_app" ] && cat "/data/adb/tricky_store/system_app" | sed '/^$/d' || echo "false"`);
+            if (systemAppList.includes("false")) {
+                currentSystemAppList.style.display = "none";
+            } else {
+                systemAppList.split("\n").forEach(app => {
+                    currentSystemAppListContent.innerHTML += `
+                    <div class="system-app-item">
+                        <span>${app}</span>
+                        <button class="remove-system-app-button ripple-element">
+                            <svg xmlns="http://www.w3.org/2000/svg" height="22px" viewBox="0 -960 960 960" width="22px" fill="#FFFFFF"><path d="M154-412v-136h652v136H154Z"/></svg>
+                        </button>
+                    </div>
+                `;
+                });
+            }
+        } catch (error) {
+            currentSystemAppList.style.display = "none";
+            console.error("Error displaying system app list:", error);
+        }
+
+        const removeSystemAppButtons = document.querySelectorAll(".remove-system-app-button");
+        removeSystemAppButtons.forEach(button => {
+            button.addEventListener("click", async () => {
+                const app = button.closest(".system-app-item").querySelector("span").textContent;
+                try {
+                    await execCommand(`
+                        sed -i "/${app}/d" "/data/adb/tricky_store/system_app" || true
+                        sed -i "/${app}/d" "/data/adb/tricky_store/target.txt" || true
+                    `);
+                    closeSystemAppOverlay();
+                    refreshAppList();
+                } catch (error) {
+                    console.error("Error removing system app:", error);
+                }
+            });
+        });
+    }
+}
+
 // Function to backup previous keybox and set new keybox
-async function setKeybox(path) {
+async function setKeybox(content) {
     try {
         await execCommand(`
             mv -f /data/adb/tricky_store/keybox.xml /data/adb/tricky_store/keybox.xml.bak 2>/dev/null
-            echo '${path}' > /data/adb/tricky_store/keybox.xml
+            echo '${content}' > /data/adb/tricky_store/keybox.xml
             chmod 644 /data/adb/tricky_store/keybox.xml
             `);
         return true;
@@ -100,68 +202,43 @@ export async function aospkb() {
 
 // Function to replace valid kb
 document.getElementById("validkb").addEventListener("click", async () => {
-    setTimeout(async () => {
-        await execCommand(`sh ${basePath}common/get_extra.sh --kb`);
-    }, 100);
-    const sourcePath = `${basePath}common/tmp/.extra`;
-    await new Promise(resolve => setTimeout(resolve, 300));
-    const fileExists = await execCommand(`[ -f ${sourcePath} ] && echo "exists"`);
-    try {
-        if (fileExists.trim() !== "exists") {
-            throw new Error(".extra file not found");
+    fetch("https://raw.githubusercontent.com/KOWX712/Tricky-Addon-Update-Target-List/main/.extra")
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
         }
-        const source = await execCommand(`xxd -r -p ${sourcePath} | base64 -d`);
-        const result = await setKeybox(source);
-        if (result) {
-            showPrompt("prompt.valid_key_set");
-        } else {
-            throw new Error("Failed to copy valid keybox");
+        return response.text();
+    })
+    .then(async data => {
+        if (!data.trim()) {
+            await aospkb();
+            showPrompt("prompt.no_valid_fallback", false);
+            return;
         }
-    } catch (error) {
-        await aospkb();
-        showPrompt("prompt.no_valid_fallback", false);
-    }
+        try {
+            const hexBytes = new Uint8Array(data.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+            const decodedHex = new TextDecoder().decode(hexBytes);
+            const source = atob(decodedHex);
+            const result = await setKeybox(source);
+            if (result) {
+                showPrompt("prompt.valid_key_set");
+            } else {
+                throw new Error("Failed to copy valid keybox");
+            }
+        } catch (error) {
+            throw new Error("Failed to decode keybox data");
+        }
+    })
+    .catch(async error => {
+        showPrompt("prompt.no_internet", false);
+    });
 });
 
-// Add file selector dialog elements dynamically
-const fileSelector = document.createElement('div');
-fileSelector.className = 'file-selector-overlay';
-fileSelector.innerHTML = `
-    <div class="file-selector">
-        <div class="file-selector-header">
-            <button class="back-button">
-                <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 -960 960 960" width="20"><path d="M400-80 0-480l400-400 56 57-343 343 343 343-56 57Z"/></svg>
-            </button>
-            <div class="current-path">/storage/emulated/0/Download</div>
-            <button class="close-selector">&#x2715;</button>
-        </div>
-        <div class="file-list"></div>
-    </div>
-`;
-document.body.appendChild(fileSelector);
-
-// Add styles for animations
-const style = document.createElement('style');
-style.textContent = `
-    .file-selector-overlay {
-        transition: opacity 0.3s ease;
-        opacity: 0;
-    }
-    .file-selector-overlay.visible {
-        opacity: 1;
-    }
-    .file-list {
-        transition: transform 0.3s ease, opacity 0.3s ease;
-    }
-    .file-list.switching {
-        transform: scale(0.95);
-        opacity: 0;
-    }
-`;
-document.head.appendChild(style);
-
+// File selector
+const fileSelector = document.querySelector('.file-selector-overlay');
 let currentPath = '/storage/emulated/0/Download';
 
+// Function to display file in current path
 function updateCurrentPath() {
     const currentPathElement = document.querySelector('.current-path');
     const segments = currentPath.split('/').filter(Boolean);
@@ -198,7 +275,7 @@ async function listFiles(path, skipAnimation = false) {
         // Add back button item if not in root directory
         if (currentPath !== '/storage/emulated/0') {
             const backItem = document.createElement('div');
-            backItem.className = 'file-item';
+            backItem.className = 'file-item ripple-element';
             backItem.innerHTML = `
                 <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24">
                     <path d="M141-160q-24 0-42-18.5T81-220v-520q0-23 18-41.5t42-18.5h280l60 60h340q23 0 41.5 18.5T881-680v460q0 23-18.5 41.5T821-160H141Z"/>
@@ -222,7 +299,7 @@ async function listFiles(path, skipAnimation = false) {
         items.forEach(item => {
             if (item.path === path) return;
             const itemElement = document.createElement('div');
-            itemElement.className = 'file-item';
+            itemElement.className = 'file-item ripple-element';
             itemElement.innerHTML = `
                 <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24">
                     ${item.isDirectory ? 
@@ -245,7 +322,7 @@ async function listFiles(path, skipAnimation = false) {
                     const source = await execCommand(`cat "${item.path}"`);
                     const result = await setKeybox(source);
                     if (result) {
-                        fileSelector.style.display = 'none';
+                        closeCustomKeyboxSelector();
                         showPrompt('prompt.custom_key_set');
                     } else {
                         showPrompt('prompt.custom_key_set_error');
@@ -309,28 +386,29 @@ document.querySelector('.back-button').addEventListener('click', async () => {
 
 // Close custom keybox selector
 document.querySelector('.close-selector').addEventListener('click', () => {
-    fileSelector.classList.remove('visible');
+    closeCustomKeyboxSelector();
+});
+fileSelector.addEventListener('click', (event) => {
+    if (event.target === fileSelector) {
+        closeCustomKeyboxSelector();
+    }
+});
+
+// Function to close custom keybox selector
+function closeCustomKeyboxSelector() {
+    fileSelector.style.opacity = '0';
     document.body.classList.remove("no-scroll");
     setTimeout(() => {
         fileSelector.style.display = 'none';
     }, 300);
-});
-fileSelector.addEventListener('click', (event) => {
-    if (event.target === fileSelector) {
-        fileSelector.classList.remove('visible');
-        document.body.classList.remove("no-scroll");
-        setTimeout(() => {
-            fileSelector.style.display = 'none';
-        }, 300);
-    }
-});
+}
 
 // Open custom keybox selector
 document.getElementById('customkb').addEventListener('click', async () => {
     fileSelector.style.display = 'flex';
     document.body.classList.add("no-scroll");
     fileSelector.offsetHeight;
-    fileSelector.classList.add('visible');
+    fileSelector.style.opacity = '1';
     currentPath = '/storage/emulated/0/Download';
     const currentPathElement = document.querySelector('.current-path');
     currentPathElement.innerHTML = currentPath.split('/').filter(Boolean).join('<span class="separator">›</span>');

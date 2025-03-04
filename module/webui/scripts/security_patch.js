@@ -1,7 +1,6 @@
 import { basePath, execCommand, showPrompt } from './main.js';
 
 const overlay = document.getElementById('security-patch-overlay');
-const card = document.getElementById('security-patch-card');
 const advancedToggle = document.getElementById('advanced-mode');
 const normalInputs = document.getElementById('normal-mode-inputs');
 const advancedInputs = document.getElementById('advanced-mode-inputs');
@@ -9,17 +8,16 @@ const allPatchInput = document.getElementById('all-patch');
 const bootPatchInput = document.getElementById('boot-patch');
 const systemPatchInput = document.getElementById('system-patch');
 const vendorPatchInput = document.getElementById('vendor-patch');
+const getButton = document.getElementById('get-patch');
 const autoButton = document.getElementById('auto-config');
 const saveButton = document.getElementById('save-patch');
 
 // Show security patch dialog
 function showSecurityPatchDialog() {
     document.body.classList.add("no-scroll");
-    overlay.style.display = 'block';
-    card.style.display = 'block';
+    overlay.style.display = 'flex';
     setTimeout(() => {
         overlay.style.opacity = '1';
-        card.style.opacity = '1';
         loadCurrentConfig();
     }, 10);
 }
@@ -28,10 +26,8 @@ function showSecurityPatchDialog() {
 function hideSecurityPatchDialog() {
     document.body.classList.remove("no-scroll");
     overlay.style.opacity = '0';
-    card.style.opacity = '0';
     setTimeout(() => {
         overlay.style.display = 'none';
-        card.style.display = 'none';
     }, 200);
 }
 
@@ -40,7 +36,7 @@ async function handleSecurityPatch(mode, value = null) {
     if (mode === 'disable') {
         try {
             await execCommand(`
-                sed -i "s/^auto_config=.*/auto_config=0/" /data/adb/security_patch
+                rm -f /data/adb/tricky_store/security_patch_auto_config
                 rm -f /data/adb/tricky_store/security_patch.txt
             `);
             showPrompt('security_patch.value_empty');
@@ -52,7 +48,7 @@ async function handleSecurityPatch(mode, value = null) {
     } else if (mode === 'manual') {
         try {
             await execCommand(`
-                sed -i "s/^auto_config=.*/auto_config=0/" /data/adb/security_patch
+                rm -f /data/adb/tricky_store/security_patch_auto_config
                 echo "${value}" > /data/adb/tricky_store/security_patch.txt
                 chmod 644 /data/adb/tricky_store/security_patch.txt
             `);
@@ -67,67 +63,65 @@ async function handleSecurityPatch(mode, value = null) {
 
 // Load current configuration
 async function loadCurrentConfig() {
+    let allValue, systemValue, bootValue, vendorValue;
     try {
-        const result = await execCommand('cat /data/adb/security_patch');
-        if (result) {
-            const lines = result.split('\n');
-            let autoConfig = '1', allValue = '0', systemValue = '0', bootValue = '0', vendorValue = '0';
-            for (const line of lines) {
-                if (line.startsWith('auto_config=')) {
-                    autoConfig = line.split('=')[1];
-                }
-            }
-
-            if (autoConfig === '1') {
-                allValue = null;
-                systemValue = null;
-                bootValue = null;
-                vendorValue = null;
-                overlay.classList.add('hidden');
-            } else {
-                // Read values from tricky_store if auto_config is 0
-                const trickyResult = await execCommand('cat /data/adb/tricky_store/security_patch.txt');
-                if (trickyResult) {
-                    const trickyLines = trickyResult.split('\n');
-                    for (const line of trickyLines) {
-                        if (line.startsWith('all=')) {
-                            allValue = line.split('=')[1] || null;
-                            if (allValue !== null) allPatchInput.value = allValue;
-                        } else {
-                            allValue = null;
-                        }
-                        if (line.startsWith('system=')) {
-                            systemValue = line.split('=')[1] || null;
-                            if (systemValue !== null) systemPatchInput.value = systemValue;
-                        } else {
-                            systemValue = null;
-                        }
-                        if (line.startsWith('boot=')) {
-                            bootValue = line.split('=')[1] || null;
-                            if (bootValue !== null) bootPatchInput.value = bootValue;
-                        } else {
-                            bootValue = null;
-                        }
-                        if (line.startsWith('vendor=')) {
-                            vendorValue = line.split('=')[1] || null;
-                            if (vendorValue !== null) vendorPatchInput.value = vendorValue;
-                        } else {
-                            vendorValue = null;
-                        }
+        const autoConfig = await execCommand('[ -f /data/adb/tricky_store/security_patch_auto_config ] && echo "true" || echo "false"');
+        if (autoConfig.trim() === 'true') {
+            allValue = null;
+            systemValue = null;
+            bootValue = null;
+            vendorValue = null;
+        } else {
+            // Read values from tricky_store if auto_config is 0
+            const trickyResult = await execCommand('cat /data/adb/tricky_store/security_patch.txt');
+            if (trickyResult) {
+                const trickyLines = trickyResult.split('\n');
+                for (const line of trickyLines) {
+                    if (line.startsWith('all=')) {
+                        allValue = line.split('=')[1] || null;
+                        if (allValue !== null) allPatchInput.value = allValue;
+                    } else {
+                        allValue = null;
+                    }
+                    if (line.startsWith('system=')) {
+                        systemValue = line.split('=')[1] || null;
+                        if (systemValue !== null) systemPatchInput.value = systemValue;
+                    } else {
+                        systemValue = null;
+                    }
+                    if (line.startsWith('boot=')) {
+                        bootValue = line.split('=')[1] || null;
+                        if (bootValue !== null) bootPatchInput.value = bootValue;
+                    } else {
+                        bootValue = null;
+                    }
+                    if (line.startsWith('vendor=')) {
+                        vendorValue = line.split('=')[1] || null;
+                        if (vendorValue !== null) vendorPatchInput.value = vendorValue;
+                    } else {
+                        vendorValue = null;
                     }
                 }
-                overlay.classList.add('hidden');
             }
-
-            // Check if in advanced mode
-            if (autoConfig === '0' && allValue === null && (bootValue || systemValue || vendorValue)) {
-                advancedToggle.checked = true;
-                normalInputs.classList.add('hidden');
-                advancedInputs.classList.remove('hidden');
+            if (allValue === null && (bootValue || systemValue || vendorValue)) {
+                checkAdvanced(true);
             }
         }
     } catch (error) {
         console.error('Failed to load security patch config:', error);
+    }
+}
+
+// Function to check advanced mode
+function checkAdvanced(shouldCheck) {
+    if (shouldCheck) {
+        advancedToggle.checked = true;
+        normalInputs.classList.add('hidden');
+        advancedInputs.classList.remove('hidden');
+    } else {
+        advancedToggle.checked = false;
+        normalInputs.classList.remove('hidden');
+        advancedInputs.classList.add('hidden');
     }
 }
 
@@ -232,18 +226,14 @@ export function securityPatch() {
             if (output.trim() === "not set") {
                 showPrompt('security_patch.auto_failed', false);
             } else {
-                await execCommand(`sed -i "s/^auto_config=.*/auto_config=1/" /data/adb/security_patch`);
+                await execCommand(`touch /data/adb/tricky_store/security_patch_auto_config`);
                 // Reset inputs
                 allPatchInput.value = '';
                 systemPatchInput.value = '';
                 bootPatchInput.value = '';
                 vendorPatchInput.value = '';
 
-                // Uncheck advanced mode
-                advancedToggle.checked = false;
-                normalInputs.classList.remove('hidden');
-                advancedInputs.classList.add('hidden');
-
+                checkAdvanced(false);
                 showPrompt('security_patch.auto_success');
             }
         } catch (error) {
@@ -318,5 +308,22 @@ export function securityPatch() {
         }
         hideSecurityPatchDialog();
         loadCurrentConfig();
+    });
+
+    // Get button
+    getButton.addEventListener('click', async () => {
+        try {
+            showPrompt('security_patch.fetching');
+            await new Promise(resolve => setTimeout(resolve, 200));
+            const output = await execCommand(`sh ${basePath}common/get_extra.sh --get-security-patch`);
+            showPrompt('security_patch.fetched', true, 1000);
+            checkAdvanced(true);
+
+            systemPatchInput.value = 'prop';
+            bootPatchInput.value = output;
+            vendorPatchInput.value = output;
+        } catch (error) {
+            showPrompt('security_patch.get_failed', false);
+        }
     });
 }

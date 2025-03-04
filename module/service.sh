@@ -23,7 +23,7 @@ add_denylist_to_target() {
 }
 
 # Spoof security patch
-if grep -q "^auto_config=1" "/data/adb/security_patch"; then
+if [ -f "/data/adb/tricky_store/security_patch_auto_config" ]; then
     sh "$MODPATH/common/get_extra.sh" --security-patch
 fi
 
@@ -80,7 +80,11 @@ done
 mkdir -p "$MODPATH/common/tmp"
 
 # Additional system apps
-SYSTEM_APP="com.google.android.gms|com.google.android.gsf|com.android.vending"
+if [ -f "/data/adb/tricky_store/system_app" ]; then
+    SYSTEM_APP=$(cat "/data/adb/tricky_store/system_app" | tr '\n' '|' | sed 's/|*$//')
+else
+    SYSTEM_APP=""
+fi
 
 # Initialize cache files to save app list and skip list
 echo "# This file is generated from service.sh to speed up load time" > "$OUTPUT_APP"
@@ -90,7 +94,7 @@ echo "# This file is generated from service.sh to speed up load time" > "$OUTPUT
 # Check Xposed module
 { 
     pm list packages -3 2>/dev/null
-    pm list package -s | grep -E "$SYSTEM_APP"
+    pm list packages -s | grep -E "$SYSTEM_APP" 2>/dev/null || true
 } | awk -F: '{print $2}' | while read -r PACKAGE; do
     # Get APK path for the package
     APK_PATH=$(pm path "$PACKAGE" 2>/dev/null | grep "base.apk" | awk -F: '{print $2}' | tr -d '\r')

@@ -2,6 +2,7 @@ body {
     background-color: #F5F5F5;
     padding-top: var(--window-inset-top);
     padding-bottom: var(--window-inset-bottom);
+    margin: 0;
 }
 
 .no-scroll {
@@ -12,28 +13,49 @@ body {
     display: flex;
     justify-content: center;
     position: fixed;
+    width: 100%;
     bottom: 50px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 10;
+    transition: transform 0.4s ease;
+    pointer-events: none;
+    z-index: 2;
 }
 
 .floating-btn {
-    flex-shrink: 0;
     background-color: #007bff;
     border: none;
     box-shadow: 0 4px 8px #0003;
     color: #fff;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    opacity: 0;
+    display: none;
+    bottom: 0;
     padding: 10px 20px;
-    font-size: 20px;
+    font-size: 22px;
     font-weight: bold;
-    transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
     border-radius: 50px 50px;
-    overflow: hidden;
+    user-select: none;
+    pointer-events: auto;
+}
+
+.overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: none;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.close-btn {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: none;
+    border: none;
+    font-size: 18px;
+    color: #ccc;
     user-select: none;
 }
 
@@ -74,26 +96,21 @@ body {
 
 .footer {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    width: calc(100% - 10px);
-    max-width: 1100px;
-    padding: 25px 0;
-    position: relative;
-    margin-left: auto;
-    margin-right: auto;
+    justify-content: center;
+    margin-bottom: 100px;
 }
 
 .uninstall-container {
-    padding: 10px 10px;
-    position: absolute;
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
+    padding: 8px;
+    width: calc(100% - 20px);
+    max-width: 900px;
     display: flex;
+    justify-content: center;
     align-items: center;
-    border-radius: 8px;
-    background-color: #CE0000;
+    border-radius: 12px;
+    border: 3px solid #FF3636;
+    box-sizing: border-box;
+    background-color: #F5F5F5;
     white-space: nowrap;
     overflow: hidden;
     user-select: none;
@@ -106,117 +123,16 @@ body {
 .uninstall-container span {
     font-size: 16px;
     font-weight: bold;
-    color: #fff;
+    color: #FF3636;
 }
 
 .uninstall-container.hidden-uninstall {
     display: none;
 }
 
-.file-selector-overlay {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    background-color: rgba(0, 0, 0, 0.5);
-    z-index: 2000;
-    justify-content: center;
-    align-items: center;
-}
-
-.file-selector {
-    width: 90%;
-    max-width: 600px;
-    height: 80vh;
-    background-color: #fff;
-    border-radius: 15px;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-
-.file-selector-header {
-    display: flex;
-    align-items: center;
-    padding: 10px;
-    border-bottom: 1px solid #ccc;
-}
-
-.current-path .separator {
-    color: #6E6E6E;
-    padding: 0 4px;
-}
-
-.back-button {
-    background: none;
-    border: none;
-    padding: 5px;
-    margin-right: 10px;
-    fill: #6E6E6E;
-    user-select: none;
-}
-
-.current-path {
-    flex-grow: 1;
-    font-size: 16px;
-    overflow: scroll;
-    white-space: nowrap;
-}
-
-.close-selector {
-    background: none;
-    border: none;
-    font-size: 20px;
-    color: #ccc;
-    padding: 5px;
-}
-
-.file-list {
-    flex-grow: 1;
-    overflow-y: auto;
-    padding: 10px;
-}
-
-.file-item {
-    display: flex;
-    align-items: center;
-    padding: 10px;
-    border-radius: 8px;
-    background-color: #fff;
-    position: relative;
-    overflow: hidden;
-    user-select: none;
-}
-
-.file-item svg {
-    margin-right: 10px;
-    fill: #6E6E6E;
-}
-
-.file-item span {
-    flex-grow: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 .permission-popup {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0, 0, 0, 0.85);
-    display: flex;
-    justify-content: center;
     align-items: center;
-    z-index: 9999;
-}
-
-.permission-popup.hidden {
-    display: none;
+    z-index: 2000;
 }
 
 .permission-content {
@@ -245,6 +161,11 @@ body {
     font-size: 16px;
 }
 
+.ripple-element {
+    position: relative;
+    overflow: hidden;
+}
+
 .ripple {
     position: absolute;
     border-radius: 50%;
@@ -271,29 +192,8 @@ body {
         color: #fff;
     }
 
-    .file-selector {
-        background-color: #343434;
-        color: #fff;
-    }
-
-    .file-selector-header {
-        border-bottom: 1px solid #6E6E6E;
-    }
-
-    .file-item {
-        background-color: #343434;
-    }
-
-    .current-path .separator {
-        color: #C2C2C2;
-    }
-
-    .back-button {
-        fill: #C2C2C2;
-    }
-
-    .file-item svg {
-        fill: #C2C2C2;
+    .uninstall-container {
+        background-color: #121212;
     }
 
     .permission-content {

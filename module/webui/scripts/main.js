@@ -1,6 +1,6 @@
 import { appListContainer, fetchAppList, modeActive } from './applist.js';
 import { initializeAvailableLanguages, detectUserLanguage, loadTranslations, setupLanguageMenu, translations } from './language.js';
-import { aospkb } from './menu_option.js';
+import { aospkb, setupSystemAppMenu } from './menu_option.js';
 import { searchMenuContainer, searchInput, clearBtn, setupMenuToggle } from './search_menu.js';
 import { updateCheck } from './update.js';
 import { securityPatch } from './security_patch.js';
@@ -15,13 +15,12 @@ const permissionPopup = document.getElementById('permission-popup');
 const loadingIndicator = document.querySelector('.loading');
 const prompt = document.getElementById('prompt');
 const floatingCard = document.querySelector('.floating-card');
-export const floatingBtn = document.querySelector('.floating-btn');
+const floatingBtn = document.querySelector('.floating-btn');
 
 export const basePath = "set-path";
 export const appsWithExclamation = [];
 export const appsWithQuestion = [];
 const ADDITIONAL_APPS = [ "android", "com.android.vending", "com.google.android.gms", "io.github.vvb2060.keyattestation", "io.github.vvb2060.mahoshojo", "icu.nullptr.nativetest" ]; // Always keep default apps in target.txt
-const rippleClasses = ['.language-option', '.menu-button', '.menu-options li', '.search-card', '.card', '.update-card', '.link-icon', '.floating-btn', '.uninstall-container', '.boot-hash-save-button', '.boot-hash-value', '.reboot', '.install', '.file-item', '.save-button', '.auto-button'];
 
 // Variables
 let e = 0;
@@ -41,7 +40,7 @@ async function getModuleVersion() {
 }
 
 // Function to refresh app list
-async function refreshAppList() {
+export async function refreshAppList() {
     isRefreshing = true;
     title.style.transform = 'translateY(0)';
     searchMenuContainer.style.transform = 'translateY(0)';
@@ -67,6 +66,26 @@ async function refreshAppList() {
     loadingIndicator.style.display = 'none';
     document.querySelector('.uninstall-container').classList.remove('hidden-uninstall');
     isRefreshing = false;
+}
+
+// Function to check tricky store version
+async function checkTrickyStoreVersion() {
+    const securityPatchElement = document.getElementById('security-patch');
+    try {
+        const version = await execCommand(`
+            TS_version=$(grep "versionCode=" "/data/adb/modules/tricky_store/module.prop" | cut -d'=' -f2)
+            [ "$TS_version" -ge 158 ] || echo "NO"
+        `);
+        if (version.trim() !== "NO") {
+            console.log("Tricky Store version is 158 or higher, displaying element.");
+            securityPatchElement.style.display = "flex";
+        } else {
+            console.log("Tricky Store version is below 158, leaving security patch element hidden.");
+        }
+    } catch (error) {
+        toast("Failed to check Tricky Store version!");
+        console.error("Error while checking Tricky Store version:", error);
+    }
 }
 
 // Function to check if Magisk
@@ -175,10 +194,16 @@ async function checkMMRL() {
         headerBlock.style.display = 'block';
         floatingCard.style.bottom = 'calc(var(--window-inset-bottom) + 50px)';
 
+        // Set status bars theme based on device theme
+        try {
+            $tricky_store.setLightStatusBars(!window.matchMedia('(prefers-color-scheme: dark)').matches)
+        } catch (error) {
+            console.log("Error setting status bars theme:", error)
+        }
+
         // Request API permission, supported version: 33045+
         try {
             $tricky_store.requestAdvancedKernelSUAPI();
-            $tricky_store.requestFileSystemAPI();
         } catch (error) {
             console.log("Error requesting API:", error);
         }
@@ -189,80 +214,78 @@ async function checkMMRL() {
             MMRL_API = true;
         } catch (error) {
             console.error('Permission check failed:', error);
-            permissionPopup.classList.remove('hidden');
+            permissionPopup.style.display('flex');
             MMRL_API = false;
         }
     }
 }
 
 // Funtion to adapt floating button hide in MMRL
-function hideFloatingBtn() {
-    if (typeof ksu !== 'undefined' && ksu.mmrl) {
-        floatingBtn.style.transform = 'translateY(calc(var(--window-inset-bottom) + 120px))';
+export function hideFloatingBtn(hide = true) {
+    if (!hide) {
+        floatingCard.style.transform = 'translateY(0)';
+    } else if (typeof ksu !== 'undefined' && ksu.mmrl) {
+        floatingCard.style.transform = 'translateY(calc(var(--window-inset-bottom) + 120px))';
     } else {
-        floatingBtn.style.transform = 'translateY(120px)';
+        floatingCard.style.transform = 'translateY(120px)';
     }
 }
 
 // Function to apply ripple effect
 export function applyRippleEffect() {
-    rippleClasses.forEach(selector => {
-        document.querySelectorAll(selector).forEach(element => {
-            if (element.dataset.rippleListener !== "true") {
-                element.addEventListener("pointerdown", function (event) {
-                    if (isScrolling) return;
-                    if (modeActive) return;
-                    
-                    const ripple = document.createElement("span");
-                    ripple.classList.add("ripple");
-    
-                    // Calculate ripple size and position
-                    const rect = element.getBoundingClientRect();
-                    const width = rect.width;
-                    const size = Math.max(rect.width, rect.height);
-                    const x = event.clientX - rect.left - size / 2;
-                    const y = event.clientY - rect.top - size / 2;
-    
-                    // Determine animation duration
-                    let duration = 0.3 + (width / 800) * 0.3;
-                    duration = Math.min(0.8, Math.max(0.2, duration));
-    
-                    // Set ripple styles
-                    ripple.style.width = ripple.style.height = `${size}px`;
-                    ripple.style.left = `${x}px`;
-                    ripple.style.top = `${y}px`;
-                    ripple.style.animationDuration = `${duration}s`;
-                    ripple.style.transition = `opacity ${duration}s ease`;
-    
-                    // Adaptive color
-                    const computedStyle = window.getComputedStyle(element);
-                    const bgColor = computedStyle.backgroundColor || "rgba(0, 0, 0, 0)";
-                    const textColor = computedStyle.color;
-                    const isDarkColor = (color) => {
-                        const rgb = color.match(/\d+/g);
-                        if (!rgb) return false;
-                        const [r, g, b] = rgb.map(Number);
-                        return (r * 0.299 + g * 0.587 + b * 0.114) < 96; // Luma formula
-                    };
-                    ripple.style.backgroundColor = isDarkColor(bgColor) ? "rgba(255, 255, 255, 0.2)" : "";
-    
-                    // Append ripple and handle cleanup
-                    element.appendChild(ripple);
-                    const handlePointerUp = () => {
-                        ripple.classList.add("end");
-                        setTimeout(() => {
-                            ripple.classList.remove("end");
-                            ripple.remove();
-                        }, duration * 1000);
-                        element.removeEventListener("pointerup", handlePointerUp);
-                        element.removeEventListener("pointercancel", handlePointerUp);
-                    };
-                    element.addEventListener("pointerup", handlePointerUp);
-                    element.addEventListener("pointercancel", handlePointerUp);
-                });
-                element.dataset.rippleListener = "true";
-            }
-        });
+    document.querySelectorAll('.ripple-element').forEach(element => {
+        if (element.dataset.rippleListener !== "true") {
+            element.addEventListener("pointerdown", function (event) {
+                if (isScrolling) return;
+                const ripple = document.createElement("span");
+                ripple.classList.add("ripple");
+
+                // Calculate ripple size and position
+                const rect = element.getBoundingClientRect();
+                const width = rect.width;
+                const size = Math.max(rect.width, rect.height);
+                const x = event.clientX - rect.left - size / 2;
+                const y = event.clientY - rect.top - size / 2;
+
+                // Determine animation duration
+                let duration = 0.2 + (width / 800) * 0.4;
+                duration = Math.min(0.8, Math.max(0.2, duration));
+
+                // Set ripple styles
+                ripple.style.width = ripple.style.height = `${size}px`;
+                ripple.style.left = `${x}px`;
+                ripple.style.top = `${y}px`;
+                ripple.style.animationDuration = `${duration}s`;
+                ripple.style.transition = `opacity ${duration}s ease`;
+
+                // Adaptive color
+                const computedStyle = window.getComputedStyle(element);
+                const bgColor = computedStyle.backgroundColor || "rgba(0, 0, 0, 0)";
+                const textColor = computedStyle.color;
+                const isDarkColor = (color) => {
+                    const rgb = color.match(/\d+/g);
+                    if (!rgb) return false;
+                    const [r, g, b] = rgb.map(Number);
+                    return (r * 0.299 + g * 0.587 + b * 0.114) < 96; // Luma formula
+                };
+                ripple.style.backgroundColor = isDarkColor(bgColor) ? "rgba(255, 255, 255, 0.2)" : "";
+
+                // Append ripple and handle cleanup
+                element.appendChild(ripple);
+                const handlePointerUp = () => {
+                    ripple.classList.add("end");
+                    setTimeout(() => {
+                        ripple.classList.remove("end");
+                        ripple.remove();
+                    }, duration * 1000);
+                    element.removeEventListener("pointerup", handlePointerUp);
+                    element.removeEventListener("pointercancel", handlePointerUp);
+                };
+                element.addEventListener("pointerup", handlePointerUp);
+                element.addEventListener("pointercancel", handlePointerUp);
+            });
+            element.dataset.rippleListener = "true";
+        }
     });
 }
 
@@ -287,7 +310,7 @@ window.addEventListener('scroll', () => {
         headerBlock.style.transform = 'translateY(0)';
         title.style.transform = 'translateY(0)';
         searchMenuContainer.style.transform = 'translateY(0)';
-        floatingBtn.style.transform = 'translateY(0)';
+        hideFloatingBtn(false);
     }
     lastScrollY = window.scrollY;
 });
@@ -303,16 +326,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadTranslations(userLang);
     setupMenuToggle();
     setupLanguageMenu();
+    setupSystemAppMenu();
     await fetchAppList();
     applyRippleEffect();
+    checkTrickyStoreVersion();
     checkMagisk();
     updateCheck();
     securityPatch();
     loadingIndicator.style.display = "none";
-    floatingBtn.style.opacity = '1';
-    setTimeout(() => {
-        floatingBtn.style.transform = 'translateY(0)';
-    }, 10);
+    floatingBtn.style.display = 'block';
+    hideFloatingBtn(false);
     document.getElementById("refresh").addEventListener("click", refreshAppList);
     document.getElementById("aospkb").addEventListener("click", aospkb);
     document.querySelector('.uninstall-container').classList.remove('hidden-uninstall');
@@ -342,5 +365,9 @@ export async function execCommand(command) {
 
 // Function to toast message
 export function toast(message) {
-    ksu.toast(message);
+    try {
+        ksu.toast(message);
+    } catch (error) {
+        console.error("Failed to show toast:", error);
+    }
 }

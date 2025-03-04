@@ -24,7 +24,6 @@
     height: calc(100% - 2px);
     width: calc(100% - 60px);
     position: absolute;
-    overflow: hidden;
 }
 
 .search-icon {
@@ -41,7 +40,7 @@
     outline: none;
     left: 10px;
     padding: 0 30px;
-    width: calc(100% - 10);
+    width: calc(100% - 80px);
 }
 
 .clear-btn {
@@ -78,8 +77,6 @@
     justify-content: center;
     z-index: 200;
     align-items: center;
-    position: relative;
-    overflow: hidden;
 }
 
 .menu-icon {
@@ -114,7 +111,8 @@
     user-select: none;
 }
 
-#select-denylist {
+#select-denylist,
+#security-patch {
     display: none;
 }
 
@@ -134,8 +132,6 @@
     padding: 12px 15px;
     text-align: left;
     background-color: white;
-    position: relative;
-    overflow: hidden;
 }
 
 .menu-options li::after {

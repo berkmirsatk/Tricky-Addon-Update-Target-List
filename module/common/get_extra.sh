@@ -2,8 +2,7 @@
 MODPATH=${0%/*}
 ORG_PATH="$PATH"
 SKIPLIST="$MODPATH/tmp/skiplist"
-OUTPUT="$MODPATH/tmp/exclude-list"
-KBOUTPUT="$MODPATH/tmp/.extra"
+XPOSED="$MODPATH/tmp/xposed"
 
 if [ "$MODPATH" = "/data/adb/modules/.TA_utl/common" ]; then
     MODDIR="/data/adb/modules/.TA_utl"
@@ -18,56 +17,31 @@ aapt() { "$MODPATH/aapt" "$@"; }
 # wget = low pref, no ssl.
 # curl, has ssl on android, we use it if found
 download() {
-    download_type=${1#--}
-    download_url=$2
-    download_output=$3
-
     PATH=/data/adb/ap/bin:/data/adb/ksu/bin:/data/adb/magisk:/data/data/com.termux/files/usr/bin:$PATH
     if command -v curl >/dev/null 2>&1; then
-        if [ "$download_type" = "output" ]; then
-            timeout 10 curl -Lo "$download_output" "$download_url"
-        else
-            timeout 3 curl -s "$download_url"
-        fi
+        timeout 10 curl -Ls "$1"
     else
-        if [ "$download_type" = "output" ]; then
-            timeout 10 busybox wget --no-check-certificate -qO "$download_output" "$download_url"
-        else
-            timeout 3 busybox wget --no-check-certificate -qO- "$download_url"
-        fi
+        timeout 10 busybox wget --no-check-certificate -qO- "$1"
     fi
     PATH="$ORG_PATH"
 }
 
-get_kb() {
-    download --output "https://raw.githubusercontent.com/KOWX712/Tricky-Addon-Update-Target-List/main/.extra" "$KBOUTPUT" 
-    [ -s "$KBOUTPUT" ] || rm -f "$KBOUTPUT"
-}
-
 get_xposed() {
-    pm list packages -3 | cut -d':' -f2 | grep -vxF -f "$SKIPLIST" | grep -vxF -f "$OUTPUT" | while read -r PACKAGE; do
+    touch "$XPOSED"
+    pm list packages -3 | cut -d':' -f2 | grep -vxF -f "$SKIPLIST" | grep -vxF -f "$XPOSED" | while read -r PACKAGE; do
         APK_PATH=$(pm path "$PACKAGE" | grep "base.apk" | cut -d':' -f2 | tr -d '\r')
         if [ -n "$APK_PATH" ]; then
             if aapt dump xmltree "$APK_PATH" AndroidManifest.xml 2>/dev/null | grep -qE "xposed.category|xposeddescription"; then
-                echo "$PACKAGE" >>"$OUTPUT"
+                echo "$PACKAGE" >> "$XPOSED"
             fi
         fi
     done
-}
-
-get_unnecessary() {
-    if [ ! -s "$OUTPUT" ] || [ ! -f "$OUTPUT" ]; then
-        JSON=$(download --fetch "https://raw.githubusercontent.com/KOWX712/Tricky-Addon-Update-Target-List/main/more-exclude.json") || exit 1
-        echo "$JSON" | grep -o '"package-name": *"[^"]*"' | awk -F'"' '{print $4}' >"$OUTPUT"
-    fi
-    get_xposed
+    cat "$XPOSED"
 }
 
 check_update() {
     [ -f "$MODDIR/disable" ] && rm -f "$MODDIR/disable"
-    JSON=$(download --fetch "https://raw.githubusercontent.com/KOWX712/Tricky-Addon-Update-Target-List/main/update.json") || exit 1
-    REMOTE_VERSION=$(echo "$JSON" | grep -o '"versionCode": *[0-9]*' | awk -F: '{print $2}' | tr -d ' ')
-    LOCAL_VERSION=$(grep -o 'versionCode=[0-9]*' "$MODPATH/update/module.prop" | awk -F= '{print $2}')
+    LOCAL_VERSION=$(grep '^versionCode=' "$MODPATH/update/module.prop" | awk -F= '{print $2}')
     if [ "$REMOTE_VERSION" -gt "$LOCAL_VERSION" ] && [ ! -f "/data/adb/modules/TA_utl/update" ]; then
         if [ "$MAGISK" = "true" ]; then
             [ -d "/data/adb/modules/TA_utl" ] && rm -rf "/data/adb/modules/TA_utl"
@@ -89,12 +63,8 @@ uninstall() {
 }
 
 get_update() {
-    JSON=$(download --fetch "https://raw.githubusercontent.com/KOWX712/Tricky-Addon-Update-Target-List/main/update.json") || exit 1
-    ZIP_URL=$(echo "$JSON" | grep -o '"zipUrl": "[^"]*"' | cut -d '"' -f 4) || exit 1
-    CHANGELOG_URL=$(echo "$JSON" | grep -o '"changelog": "[^"]*"' | cut -d '"' -f 4) || exit 1
-    echo "$JSON" | grep '"version"' | sed 's/.*: "//; s/".*//' > "$MODPATH/tmp/version" || exit 1
-    download --output "$ZIP_URL" "$MODPATH/tmp/module.zip" || exit 1
-    download --output "$CHANGELOG_URL" "$MODPATH/tmp/changelog.md" || exit 1
+    download "$ZIP_URL" > "$MODPATH/tmp/module.zip"
+    [ -s "$MODPATH/tmp/module.zip" ] || exit 1
 }
 
 install_update() {
@@ -114,7 +84,6 @@ install_update() {
 }
 
 release_note() {
-    VERSION=$(grep 'v' "$MODPATH/tmp/version")
     awk -v header="### $VERSION" '
         $0 == header { 
             print; 
@@ -139,32 +108,32 @@ set_security_patch() {
     security_patch_after_1y=$(echo "$formatted_security_patch + 10000" | bc)
     TODAY=$(date +%Y%m%d)
     if [ -n "$formatted_security_patch" ] && [ "$TODAY" -lt "$security_patch_after_1y" ]; then
-        TS_version=$(grep "versionCode=" "$TS/module.prop" | cut -d'=' -f2)
+        TS_version=$(grep "versionCode=" "/data/adb/modules/tricky_store/module.prop" | cut -d'=' -f2)
         if [ "$TS_version" -lt 158 ]; then
             resetprop ro.vendor.build.security_patch "$security_patch"
             resetprop ro.build.version.security_patch "$security_patch"
+        else
+            SECURITY_PATCH_FILE="/data/adb/tricky_store/security_patch.txt"
+            printf "system=prop\nboot=%s\nvendor=%s\n" "$security_patch" "$security_patch" > "$SECURITY_PATCH_FILE"
+            chmod 644 "$SECURITY_PATCH_FILE"
         fi
-        echo "all=$formatted_security_patch" > "/data/adb/tricky_store/security_patch.txt"
-        chmod 644 "/data/adb/tricky_store/security_patch.txt"
-    else 
+    else
         echo "not set"
     fi
 }
 
+get_latest_security_patch() {
+    security_patch=$(download "https://source.android.com/docs/security/bulletin/pixel" | grep -o "<td>[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}</td>" | head -n 1 | sed 's/<td>\(.*\)<\/td>/\1/')
+    [ -n "$security_patch" ] && echo "$security_patch" || exit 1
+}
+
 case "$1" in
---kb)
-    get_kb
-    exit
-    ;;
---unnecessary)
-    get_unnecessary
-    exit
-    ;;
 --xposed)
     get_xposed
     exit
     ;;
---update)
+--check-update)
+    REMOTE_VERSION="$2"
     check_update
     exit
     ;;
@@ -173,6 +142,7 @@ case "$1" in
     exit
     ;;
 --get-update)
+    ZIP_URL="$2"
     get_update
     exit
     ;;
@@ -181,11 +151,16 @@ case "$1" in
     exit
     ;;
 --release-note)
+    VERSION="$2"
     release_note
     exit
     ;;
 --security-patch)
     set_security_patch
+    exit
+    ;;
+--get-security-patch)
+    get_latest_security_patch
     exit
     ;;
 esac
